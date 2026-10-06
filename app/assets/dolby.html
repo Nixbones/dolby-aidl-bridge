@@ -153,6 +153,25 @@
   .tg.active .lamp { background: var(--accent-soft); }
   .tg.active .lamp::after { transform: translateX(12px); background: var(--accent); }
 
+  /* ---------- эквалайзер: 20 полос, управление пальцем ---------- */
+  .geq {
+    position: relative; height: 128px; display: flex; gap: 3px; padding: 12px 10px;
+    border-radius: 18px; background: var(--card);
+    border: 1px solid rgba(244,239,230,.06); touch-action: none;
+  }
+  .geq .col { flex: 1 1 0; position: relative; }
+  .geq .mid { position: absolute; left: -2px; right: -2px; top: 50%; height: 1px; background: rgba(244,239,230,.13); }
+  .geq .bar {
+    position: absolute; left: 50%; transform: translateX(-50%); width: 62%;
+    border-radius: 3px; background: linear-gradient(to top, var(--accent), rgba(255,77,28,.45));
+    transition: height .07s linear, top .07s linear, background .2s var(--ease);
+  }
+  .geq .bar.neg { background: linear-gradient(to bottom, rgba(244,239,230,.45), rgba(244,239,230,.2)); }
+  .geq .zero { position: absolute; left: 50%; transform: translateX(-50%); width: 62%; top: 50%; height: 2px;
+               background: rgba(244,239,230,.25); border-radius: 2px; }
+  .scale { display: flex; justify-content: space-between; margin-top: 8px; color: var(--faint); font-size: .58rem; letter-spacing: .02em; }
+  .eqinfo { margin-top: 10px; color: var(--faint); font-size: .7rem; }
+
   footer { width: 100%; max-width: 460px; margin-top: 34px; display: flex; flex-direction: column; align-items: center; gap: 12px; position: relative; z-index: 10; }
   .hint { color: var(--faint); font-size: .72rem; text-align: center; line-height: 1.55; }
   .link { background: none; border: none; color: var(--muted); font-family: var(--sans); font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
@@ -217,27 +236,27 @@
     <div class="row">
       <div class="top"><span class="name">Бас</span><span class="val" id="vBass">выкл</span></div>
       <input type="range" id="sBass" min="0" max="192" step="8" value="0">
-      <div class="desc">Bass Enhancer Dolby (beb). 0 - выключен, 192 - максимум как в эталонном профиле Dolby.</div>
+      <div class="desc">Bass Enhancer Dolby (beb). 0 — выключен, 192 — максимум как в эталонном профиле Dolby.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">Диалоги</span><span class="val" id="vDe">4</span></div>
       <input type="range" id="sDe" min="0" max="16" step="1" value="4">
-      <div class="desc">Dialog Enhancer (dea) - подчёркивает речь и вокал.</div>
+      <div class="desc">Dialog Enhancer (dea) — подчёркивает речь и вокал.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">Выравнивание громкости</span><span class="val" id="vLev">0</span></div>
       <input type="range" id="sLev" min="0" max="10" step="1" value="0">
-      <div class="desc">Volume Leveler (dvla) - подтягивает тихие места, убирает провалы.</div>
+      <div class="desc">Volume Leveler (dvla) — подтягивает тихие места, убирает провалы.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">Общий подъём уровня</span><span class="val" id="vVmb">56</span></div>
       <input type="range" id="sVmb" min="0" max="64" step="2" value="56">
-      <div class="desc">Volume Maximizer (vmb) - общая громкость обработки. Убавь, если стало слишком громко.</div>
+      <div class="desc">Volume Maximizer (vmb) — общая громкость обработки. Убавь, если стало слишком громко.</div>
     </div>
     <div class="row">
       <div class="top"><span class="name">Intelligent EQ</span><span class="val" id="vIeq">4</span></div>
       <input type="range" id="sIeq" min="0" max="16" step="1" value="4">
-      <div class="desc">Умный эквалайзер Dolby (iea) - балансирует тембр под музыку.</div>
+      <div class="desc">Умный эквалайзер Dolby (iea) — балансирует тембр под музыку.</div>
     </div>
   </div>
 </section>
@@ -253,8 +272,19 @@
   </div>
 </section>
 
+<!-- эквалайзер -->
+<section class="panel rise r5">
+  <h2>Эквалайзер · 20 полос</h2>
+  <div class="geq" id="geq"></div>
+  <div class="scale">
+    <span>47 Гц</span><span>234</span><span>1031</span><span>4688</span><span>19.7 кГц</span>
+  </div>
+  <div class="eqinfo" id="geqInfo">все полосы 0 дБ</div>
+  <button class="link" id="geqReset" style="align-self:flex-start; margin-top: 12px">Сбросить эквалайзер</button>
+</section>
+
 <footer>
-  <p class="hint" id="hint">Включи музыку и двигай ползунки - всё применяется на лету.</p>
+  <p class="hint" id="hint">Включи музыку и двигай ползунки — всё применяется на лету.</p>
   <p class="badge" id="mode">проверяю доступ…</p>
   <button class="link" id="logBtn">Лог обработки</button>
   <pre class="log" id="logBox"></pre>
@@ -279,6 +309,12 @@
     ieq: 4,        // 0..16   -> iea (ieon всегда включён)
     ngon: 1, lave: 1, rvse: 1, hpon: 0
   };
+
+  /* полосы эквалайзера Dolby (частоты из эталонного профиля) */
+  var GEQ_FREQS = [47, 141, 234, 328, 469, 656, 844, 1031, 1313, 1688,
+                   2250, 3000, 3750, 4688, 5813, 7125, 9000, 11250, 13875, 19688];
+  var GEQ_MAX = 12;
+  state.bands = new Array(GEQ_FREQS.length).fill(0);
 
   var PROFILES = {
     dolby:  { bass: 0,   de: 4, lev: 0, vmb: 56, ieq: 4, ngon: 1, lave: 1, rvse: 1, hpon: 0 },
@@ -313,9 +349,80 @@
       "ngon " + state.ngon,
       "lave " + state.lave,
       "rvse " + state.rvse,
-      "hpon " + state.hpon
+      "hpon " + state.hpon,
+      geqLine()
     ].join("\n") + "\n";
   }
+
+  /* строка параметра gebs: [число полос][частоты][усиления в 1/16 дБ] */
+  function geqLine() {
+    var gains = state.bands.map(function (db) { return Math.round(db * 16); });
+    return "gebs " + GEQ_FREQS.length + " " + GEQ_FREQS.join(" ") + " " + gains.join(" ");
+  }
+
+  function renderGeq() {
+    var cols = document.getElementById("geq").querySelectorAll(".col");
+    for (var i = 0; i < cols.length; i++) {
+      var bar = cols[i].querySelector(".bar");
+      var db = state.bands[i] || 0;
+      var h = Math.min(50, Math.abs(db) / GEQ_MAX * 50);
+      bar.style.top = (db >= 0 ? (50 - h) : 50) + "%";
+      bar.style.height = h + "%";
+      bar.classList.toggle("neg", db < 0);
+    }
+    var active = state.bands.filter(function (v) { return Math.round(v * 16) !== 0; }).length;
+    var info = document.getElementById("geqInfo");
+    if (info) info.textContent = active === 0 ? "все полосы 0 дБ" : "активных полос: " + active;
+  }
+
+  (function buildGeq() {
+    var host = document.getElementById("geq");
+    for (var i = 0; i < GEQ_FREQS.length; i++) {
+      var col = document.createElement("div");
+      col.className = "col";
+      col.innerHTML = '<div class="mid"></div><div class="bar"></div><div class="zero"></div>';
+      host.appendChild(col);
+    }
+    var dragging = false;
+
+    function applyFromPointer(e) {
+      var rect = host.getBoundingClientRect();
+      var x = (e.clientX) - rect.left - 10;
+      var y = (e.clientY) - rect.top - 12;
+      var innerW = rect.width - 20, innerH = rect.height - 24;
+      var idx = Math.floor(x / (innerW / GEQ_FREQS.length));
+      if (idx < 0) idx = 0;
+      if (idx >= GEQ_FREQS.length) idx = GEQ_FREQS.length - 1;
+      var db = (0.5 - y / innerH) * 2 * GEQ_MAX;
+      db = Math.max(-GEQ_MAX, Math.min(GEQ_MAX, Math.round(db)));
+      state.bands[idx] = db;
+      profile = "custom";
+      renderGeq();
+      pushParamsDebounced();
+    }
+
+    host.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      try { host.setPointerCapture(e.pointerId); } catch (err) {}
+      applyFromPointer(e);
+      e.preventDefault();
+    });
+    host.addEventListener("pointermove", function (e) {
+      if (dragging) { applyFromPointer(e); e.preventDefault(); }
+    });
+    host.addEventListener("pointerup", function () {
+      dragging = false;
+      pushParams();
+      if (navigator.vibrate) navigator.vibrate(6);
+    });
+    host.addEventListener("pointercancel", function () { dragging = false; });
+  })();
+
+  document.getElementById("geqReset").addEventListener("click", function () {
+    state.bands = new Array(GEQ_FREQS.length).fill(0);
+    renderGeq();
+    pushParams();
+  });
 
   function pushParams() {
     if (!bridge) return;
@@ -336,9 +443,14 @@
       var t = line.trim();
       if (!t || t.charAt(0) === "#") return;
       var p = t.split(/\s+/);
+      if (p[0] === "gebs") {
+        var nbands = parseInt(p[1], 10) || 0;
+        map.__geq = p.slice(2 + nbands, 2 + 2 * nbands).map(function (v) { return parseInt(v, 10) || 0; });
+        return;   // выход из обработчика строки (это функция для каждой строки)
+      }
       if (p.length >= 2) map[p[0]] = parseInt(p[1], 10);
     });
-    if (Object.keys(map).length === 0) return;   // файла нет - профиль Dolby
+    if (Object.keys(map).length === 0) return;   // файла нет — профиль Dolby
     if (isFinite(map.beb)) state.bass = map.beb;
     if (isFinite(map.dea)) state.de = map.dea;
     if (isFinite(map.dvla)) state.lev = map.dvla;
@@ -348,6 +460,11 @@
     if (isFinite(map.lave)) state.lave = map.lave;
     if (isFinite(map.rvse)) state.rvse = map.rvse;
     if (isFinite(map.hpon)) state.hpon = map.hpon;
+    if (map.__geq && map.__geq.length) {
+      var g = map.__geq.slice(0, GEQ_FREQS.length);
+      while (g.length < GEQ_FREQS.length) g.push(0);
+      state.bands = g.map(function (v) { return v / 16; });
+    }
     profile = "custom";
     Object.keys(PROFILES).forEach(function (k) {
       var p = PROFILES[k], same = true;
@@ -375,6 +492,7 @@
     document.getElementById("vVmb").textContent = state.vmb;
     document.getElementById("vIeq").textContent = state.ieq;
 
+    renderGeq();
     Array.prototype.forEach.call(document.querySelectorAll("#profiles .chip"), function (c) {
       c.classList.toggle("active", c.dataset.p === profile);
     });

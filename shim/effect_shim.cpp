@@ -202,7 +202,7 @@ static const uint32_t CMD_SET_PARAM = 5;        // EFFECT_CMD_SET_PARAM
 // EffectParamParser): effect_param_t {status, psize=4, vsize, paramId=0(SET_VALUES)}
 // + блоб [activeDevice u32][numParams u32] { [deviceId u32][paramId u32]
 //   [numValues u32][values i32 *n] }...
-// Адресация параметров - 4CC-код, записанный как 4 байта ASCII (LE u32).
+// Адресация параметров — 4CC-код, записанный как 4 байта ASCII (LE u32).
 static constexpr uint32_t P4(char a, char b, char c, char d) {
     return static_cast<uint32_t>(static_cast<uint8_t>(a)) |
            (static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8) |
@@ -214,7 +214,7 @@ static constexpr uint32_t P3(char a, char b, char c) { return P4(a, b, c, '\0');
 struct DapParam {
     uint32_t id;
     uint32_t n;
-    int32_t v[8];
+    int32_t v[64];   // хватает на 20-полосный эквалайзер (2*20+1 = 41 значение)
 };
 static const size_t kMaxDapParams = 48;
 using DapParamList = std::vector<DapParam>;
@@ -483,7 +483,7 @@ static bool bypassRequested() {
 }
 
 // ===== профиль Dolby ========================================================
-// Значения взяты из настоящего dax-default.xml (профиль "Dynamic"/"Music") -
+// Значения взяты из настоящего dax-default.xml (профиль "Dynamic"/"Music") —
 // это эталонные числа самого Dolby для наушников и динамика.
 static DapParamList buildAtmosProfile(bool on, bool headphone) {
     const int32_t E = on ? 1 : 0;
@@ -494,7 +494,7 @@ static DapParamList buildAtmosProfile(bool on, bool headphone) {
         d.id = id;
         d.n = 0;
         for (int32_t v : vals) {
-            if (d.n < 8) d.v[d.n++] = v;
+            if (d.n < 64) d.v[d.n++] = v;
         }
         ps.push_back(d);
     };
@@ -541,7 +541,7 @@ static DapParamList buildAtmosProfile(bool on, bool headphone) {
     return ps;
 }
 
-// файл-подстройка: "deam 6" / "beb 192 0" - по строке на параметр
+// файл-подстройка: "deam 6" / "beb 192 0" — по строке на параметр
 // (/data/vendor/dolby/dolby_params.txt или /data/local/tmp/dolby_params.txt)
 static bool readParamsFile(DapParamList& ps, uint64_t* sig) {
     const char* paths[] = { "/data/vendor/dolby/dolby_params.txt",
@@ -573,7 +573,7 @@ static bool readParamsFile(DapParamList& ps, uint64_t* sig) {
                     DapParam d{};
                     d.id = id;
                     d.n = 0;
-                    while (*p && d.n < 8) {
+                    while (*p && d.n < 64) {
                         while (*p == ' ' || *p == '\t' || *p == ',') p++;
                         if (!*p || *p == '#') break;
                         char* end = nullptr;
@@ -615,7 +615,7 @@ bool DapEffect::sendSetValues(const DapParamList& ps) {
     w32(8, static_cast<uint32_t>(blob));  // vsize
     w32(12, 0);                       // paramId = EFFECT_PARAM_SET_VALUES
     size_t o = 16;
-    // ВАЖНО: activeDevice != 0 - только тогда Dolby коммитит параметры в DSP
+    // ВАЖНО: activeDevice != 0 — только тогда Dolby коммитит параметры в DSP
     // (дизасм DapEffectContext::setParamValues: CBZ на поле +16 пропускает commit)
     w32(o, mDevice); o += 4;
     w32(o, static_cast<uint32_t>(ps.size())); o += 4;
@@ -650,7 +650,7 @@ bool DapEffect::applyAtmos(bool on) {
     mParamsFileSig = sig;
     ALOGI("applyAtmos: on=%d headphone=%d params=%u file=%d", on ? 1 : 0,
           mHeadphone ? 1 : 0, (unsigned)ps.size(), haveFile ? 1 : 0);
-    // крупный лог по каждому параметру - чтобы в отладке было видно, что ушло
+    // крупный лог по каждому параметру — чтобы в отладке было видно, что ушло
     for (const auto& p : ps) {
         char c[5] = { (char)(p.id & 0xFF), (char)((p.id >> 8) & 0xFF),
                       (char)((p.id >> 16) & 0xFF), (char)((p.id >> 24) & 0xFF), 0 };
@@ -698,7 +698,7 @@ bool DapEffect::applyAtmos(bool on) {
     if (!pushConfig())
         return ::ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
 
-    // EFFECT_CMD_INIT - обязательная инициализация (как в AudioFlinger::EffectModule::init)
+    // EFFECT_CMD_INIT — обязательная инициализация (как в AudioFlinger::EffectModule::init)
     if (mHandle) {
         uint32_t rs = sizeof(int32_t); int32_t reply = 0;
         int32_t r0 = (*mHandle)->command(mHandle, CMD_INIT, 0, nullptr, &rs, &reply);
@@ -708,7 +708,7 @@ bool DapEffect::applyAtmos(bool on) {
         int32_t rE = (*mHandle)->command(mHandle, CMD_ENABLE, 0, nullptr, &rsE, &replyE);
         ALOGI("ENABLE(в open) -> %d reply=%d", rE, replyE);
         mLegacyEnabled = true;
-        // включить функции Dolby (deon/ieon/dvle/...) - без этого движок
+        // включить функции Dolby (deon/ieon/dvle/...) — без этого движок
         // работает «прозрачно» (сам Dolby сбрасывает все тумблеры в 0 при init)
         mApplyPending = bypassRequested() ? 0 : 1;
     }
@@ -785,7 +785,7 @@ void DapEffect::workerLoop() {
         out.resize(avail);
         orig.resize(avail);
         std::copy(in.begin(), in.end(), orig.begin());   // снимок ДО обработки
-        // (Dolby может писать прямо во входной буфер - in-place!)
+        // (Dolby может писать прямо во входной буфер — in-place!)
 
         audio_buffer_t bin{}, bout{};
         bin.audio.f32 = in.data(); bin.frameCount = avail / channelCount();
@@ -919,7 +919,7 @@ void DapEffect::workerLoop() {
                 if (hp != mHeadphone || dev != mDevice) {
                     mHeadphone = hp;
                     mDevice = dev;
-                    mApplyPending = 1;   // параметры привязаны к устройству - пере-применяем
+                    mApplyPending = 1;   // параметры привязаны к устройству — пере-применяем
                 } else {
                     mDevice = dev;
                 }
