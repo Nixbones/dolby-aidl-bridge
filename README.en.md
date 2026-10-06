@@ -164,4 +164,5 @@ closed source libraries, writing a system component in C++ and building a contro
 ## License
 
 Project code is MIT (see [LICENSE](LICENSE)). Dolby libraries are not part of this repository and are
-not covered by the license. UI fonts (Manrope, Playfair Display) are licensed under SIL OFL 1.1.
+not covered by the license, see [NOTICE.md](NOTICE.md) for details. UI fonts (Manrope, Playfair Display)
+are licensed under SIL OFL 1.1.
