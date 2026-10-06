@@ -135,6 +135,12 @@ docs/     technical notes, parameter table, build instructions
 tools/    helper utilities (ELF dependency patching)
 ```
 
+## Prebuilt artifacts
+
+The compiled bridge library and the app APK are attached to
+[Releases](https://github.com/Nixbones/dolby-aidl-bridge/releases). They do not contain Dolby
+libraries: those must be taken from a device firmware that ships Atmos (see [docs/BUILD.md](docs/BUILD.md)).
+
 ## How to reproduce
 
 1. Build the environment and the bridge: [docs/BUILD.md](docs/BUILD.md).
