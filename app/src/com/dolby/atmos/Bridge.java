@@ -13,20 +13,22 @@ import java.util.concurrent.TimeUnit;
 /**
  * Мост в JavaScript (window.Android).
  *
- * Управляет аудиомостом libdolbyaidlshim.so через два файла:
- *   /data/vendor/dolby/dolby_bypass     - "1" = обработка выключена (прозрачный звук)
- *   /data/vendor/dolby/dolby_params.txt - настройки: строки вида "beon 1", "beb 160"
+ * Управляет аудиомостом libdolbyaidlshim.so через файлы в /data/vendor/dolby:
+ *   dolby_bypass     - "1" = обработка выключена (прозрачный звук)
+ *   dolby_params.txt - настройки: строки вида "beon 1", "beb 160", "gebs 20 ..."
+ *   dolby_status     - состояние от моста: "on=1;device=0x2;headphone=0;params=32;"
+ *   presets/*.txt    - пользовательские пресеты
  *
- * Пишем напрямую (папка 0777 - работает, пока SELinux permissive), а если
- * не вышло - через root (su). После записи через root ставим chmod 666,
- * чтобы следующие переключения шли без запроса root.
+ * Пишем напрямую (каталог доступен на запись), при неудаче - через root (su).
  */
 public class Bridge {
 
     private static final String DIR = "/data/vendor/dolby";
-    private static final String FLAG = DIR + "/dolby_bypass";
+    static final String FLAG = DIR + "/dolby_bypass";
     private static final String FLAG_TMP = "/data/local/tmp/dolby_bypass";
     private static final String PARAMS = DIR + "/dolby_params.txt";
+    private static final String STATUS = DIR + "/dolby_status";
+    private static final String PRESETS = DIR + "/presets";
     private static final String LOG = "/data/local/tmp/dolby_shim.log";
     private static final String MARK = "__OK__";
 
@@ -38,12 +40,11 @@ public class Bridge {
 
     // ---------- запуск команд ----------
 
-    private static String exec(String[] cmd, boolean root) {
+    static String exec(String[] cmd) {
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(cmd);
             final Process fp = p;
-            // страховка от «зависшего» запроса root (KernelSU ждёт подтверждения)
             Thread killer = new Thread(() -> {
                 try {
                     Thread.sleep(6000);
@@ -69,17 +70,17 @@ public class Bridge {
         }
     }
 
-    private static String su(String script) {
-        return exec(new String[] { "su", "-c", script + " && echo " + MARK }, true);
+    static String su(String script) {
+        return exec(new String[] { "su", "-c", script + " && echo " + MARK });
     }
 
-    private static boolean ok(String out) {
+    static boolean ok(String out) {
         return out != null && out.contains(MARK);
     }
 
     // ---------- файлы ----------
 
-    private static String readFile(String path) {
+    static String readFile(String path) {
         try {
             File f = new File(path);
             if (!f.exists() || !f.canRead()) return null;
@@ -94,15 +95,30 @@ public class Bridge {
         }
     }
 
-    /** записать файл: сначала напрямую, потом через root */
-    private boolean writeSmart(String path, String content) {
+    /** запись, которую видит и аудио-процесс, и другие версии приложения */
+    private static boolean tryWrite(String path, String content) {
         try {
             FileOutputStream o = new FileOutputStream(path);
             o.write(content.getBytes("UTF-8"));
             o.close();
-            return true;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            return false;
         }
+        File f = new File(path);
+        f.setReadable(true, false);   // читает мост из аудио-процесса
+        f.setWritable(true, false);   // и смогут писать будущие версии приложения
+        return true;
+    }
+
+    /** записать файл: сначала напрямую, потом через root */
+    boolean writeSmart(String path, String content) {
+        File parent = new File(path).getParentFile();
+        if (parent != null && !parent.exists()) parent.mkdirs();
+        if (tryWrite(path, content)) return true;
+
+        // файл мог остаться от прежней установки (другой uid) - удаляем и создаём заново
+        File old = new File(path);
+        if (old.exists() && old.delete() && tryWrite(path, content)) return true;
         File t;
         try {
             t = new File(ctx.getCacheDir(), "tmp_" + new File(path).getName());
@@ -112,23 +128,29 @@ public class Bridge {
         } catch (Exception e) {
             return false;
         }
-        String s = "mkdir -p " + DIR + "; cp -f '" + t.getAbsolutePath() + "' " + path
-                + "; chmod 666 " + path;
+        String dir = parent != null ? parent.getAbsolutePath() : DIR;
+        String s = "mkdir -p '" + dir + "'; cp -f '" + t.getAbsolutePath() + "' '" + path
+                + "'; chmod 666 '" + path + "'";
         return ok(su(s));
     }
 
-    private boolean deleteSmart(String path) {
+    private static void makeWorldReadable(String path) {
+        // мост читает файл из аудио-процесса: права 666, иначе не увидит
+        su("chmod 666 '" + path + "' 2>/dev/null");
+    }
+
+    boolean deleteSmart(String path) {
         try {
             File f = new File(path);
             if (!f.exists() || f.delete()) return !f.exists();
         } catch (Exception ignored) {
         }
-        return ok(su("rm -f " + path));
+        return ok(su("rm -f '" + path + "'"));
     }
 
-    // ---------- состояние ----------
+    // ---------- состояние обработки ----------
 
-    /** "direct" | "su" - как работает управление (для показа в интерфейсе) */
+    /** "direct" | "su" | "none" - как работает управление (для интерфейса) */
     @JavascriptInterface
     public String mode() {
         if (writeSmart(DIR + "/.probe", "1")) {
@@ -161,7 +183,54 @@ public class Bridge {
         return isBypassed() == bypassed;
     }
 
-    // ---------- настройки (профили/ползунки) ----------
+    /** текущее устройство вывода по данным системы: "headphone" | "speaker" | "" */
+    @JavascriptInterface
+    public String currentOutput() {
+        try {
+            android.media.AudioManager am =
+                    (android.media.AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return "";
+            boolean hp = false, spk = false;
+            for (android.media.AudioDeviceInfo d
+                    : am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)) {
+                switch (d.getType()) {
+                    case android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+                    case android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET:
+                    case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+                    case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+                    case android.media.AudioDeviceInfo.TYPE_USB_HEADSET:
+                    case android.media.AudioDeviceInfo.TYPE_HEARING_AID:
+                        hp = true;
+                        break;
+                    case android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER:
+                        spk = true;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            if (hp) return "headphone";
+            if (spk) return "speaker";
+        } catch (Exception ignored) {
+        }
+        return "";
+    }
+
+    /** подсказка мосту, какое устройство сейчас играет (мост сам его не видит) */
+    @JavascriptInterface
+    public void setDeviceHint(String device) {
+        String v = "headphone".equals(device) ? "headphone" : "speaker";
+        writeSmart(DIR + "/dolby_device", v + (char) 10);
+    }
+
+    /** состояние от моста: "on=1;device=0x2;headphone=0;params=32;" */
+    @JavascriptInterface
+    public String status() {
+        String s = readFile(STATUS);
+        return s == null ? "" : s.trim();
+    }
+
+    // ---------- настройки ----------
 
     @JavascriptInterface
     public boolean setParams(String text) {
@@ -178,16 +247,66 @@ public class Bridge {
         return s == null ? "" : s;
     }
 
-    /** хвост лога аудиомоста - для диагностики прямо в приложении */
+    // ---------- пресеты ----------
+
+    @JavascriptInterface
+    public String listPresets() {
+        StringBuilder sb = new StringBuilder();
+        File dir = new File(PRESETS);
+        File[] files = dir.listFiles();
+        if (files != null) {
+            java.util.Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
+            for (File f : files) {
+                String n = f.getName();
+                if (n.endsWith(".txt")) sb.append(n.substring(0, n.length() - 4)).append('\n');
+            }
+        }
+        if (sb.length() == 0) {
+            String viaSu = su("ls -1 " + PRESETS + " 2>/dev/null");
+            if (viaSu != null) {
+                for (String line : viaSu.split("\n")) {
+                    String t = line.trim();
+                    if (t.endsWith(".txt")) sb.append(t.substring(0, t.length() - 4)).append('\n');
+                }
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    @JavascriptInterface
+    public boolean savePreset(String name, String text) {
+        String clean = (name == null ? "" : name).replaceAll("[^\\p{L}\\p{N}_ \\-]", "").trim();
+        if (clean.isEmpty()) return false;
+        return writeSmart(PRESETS + "/" + clean + ".txt", text == null ? "" : text);
+    }
+
+    @JavascriptInterface
+    public String loadPreset(String name) {
+        String clean = (name == null ? "" : name).replaceAll("[^\\p{L}\\p{N}_ \\-]", "").trim();
+        if (clean.isEmpty()) return "";
+        String s = readFile(PRESETS + "/" + clean + ".txt");
+        if (s == null) s = su("cat '" + PRESETS + "/" + clean + ".txt' 2>/dev/null");
+        return s == null ? "" : s;
+    }
+
+    @JavascriptInterface
+    public boolean deletePreset(String name) {
+        String clean = (name == null ? "" : name).replaceAll("[^\\p{L}\\p{N}_ \\-]", "").trim();
+        if (clean.isEmpty()) return false;
+        return deleteSmart(PRESETS + "/" + clean + ".txt");
+    }
+
+    // ---------- диагностика ----------
+
     @JavascriptInterface
     public String logTail() {
-        String s = su("tail -30 " + LOG + " 2>/dev/null");
+        String s = su("tail -25 " + LOG + " 2>/dev/null");
         if (s == null || s.trim().isEmpty()) s = readFile(LOG);
         return s == null ? "" : s;
     }
 
     @JavascriptInterface
     public String info() {
-        return "Dolby Atmos bridge v3 | режим: " + mode();
+        return "Dolby Atmos bridge v4 | режим: " + mode();
     }
 }

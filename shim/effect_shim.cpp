@@ -375,7 +375,8 @@ class DapEffect : public BnEffect {
     ::ndk::ScopedAStatus reopen(IEffect::OpenEffectReturn* ret) override;
   private:
     Descriptor mAidlDesc;
-    std::mutex mMutex;
+    std::mutex mMutex;          // состояние объекта
+    std::mutex mHalMutex;       // сериализация вызовов в библиотеку Dolby
     State mState = State::INIT;
 
     effect_handle_t mHandle = nullptr;
@@ -406,6 +407,7 @@ class DapEffect : public BnEffect {
     uint64_t mParamsFileSig = 0;
     bool mAmosOn = false;
     bool mHeadphone = false;
+    bool mDeviceFromFramework = false;   // устройство сообщила сама система
     uint32_t mDevice = AUDIO_DEVICE_OUT_SPEAKER_L;   // аудио-устройство вывода
 
     // тот же интерфейс, что вызывает сам Dolby в DapEffectContext::init
@@ -642,8 +644,34 @@ void DapEffect::setEngineParam(uint32_t id, int32_t value) {
     sendSetValues(ps);
 }
 
+// статус для приложения: устройство вывода и включена ли обработка.
+// формат "ключ=значение;" (без переводов строк - так надёжнее собирать файл)
+static void writeStatusFile(bool on, uint32_t device, bool headphone, size_t params) {
+    int fd = open("/data/vendor/dolby/dolby_status", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return;
+    char buf[160];
+    int n = snprintf(buf, sizeof(buf), "on=%d;device=0x%x;headphone=%d;params=%u;",
+                     on ? 1 : 0, device, headphone ? 1 : 0, static_cast<unsigned>(params));
+    if (n > 0) { ssize_t w = write(fd, buf, static_cast<size_t>(n)); (void)w; }
+    close(fd);
+}
+
+// подсказка от приложения: какое устройство вывода играет сейчас.
+// система описывает устройство не всегда, поэтому при необходимости берём файл.
+static void applyDeviceHint(uint32_t* device, bool* headphone) {
+    int fd = open("/data/vendor/dolby/dolby_device", O_RDONLY);
+    if (fd < 0) return;
+    char b[16] = {0};
+    ssize_t n = read(fd, b, sizeof(b) - 1);
+    close(fd);
+    if (n <= 0) return;
+    if (b[0] == 'h') { *device = 0x8; *headphone = true; }
+    else if (b[0] == 's') { *device = AUDIO_DEVICE_OUT_SPEAKER_L; *headphone = false; }
+}
+
 bool DapEffect::applyAtmos(bool on) {
     if (!mHandle) return false;
+    if (!mDeviceFromFramework) applyDeviceHint(&mDevice, &mHeadphone);
     DapParamList ps = buildAtmosProfile(on, mHeadphone);
     uint64_t sig = mParamsFileSig;
     bool haveFile = readParamsFile(ps, &sig);
@@ -657,6 +685,7 @@ bool DapEffect::applyAtmos(bool on) {
         ALOGI("  %s = %d (n=%u)", c, p.n ? (int)p.v[0] : -1, (unsigned)p.n);
     }
     mAmosOn = on;
+    writeStatusFile(on, mDevice, mHeadphone, ps.size());
     return sendSetValues(ps);
 }
 
@@ -755,6 +784,7 @@ void DapEffect::workerLoop() {
         int pend = mApplyPending.exchange(-1);
         if (pend >= 0) {
             ALOGI("worker: применяю профиль Dolby (%s)", pend ? "ВКЛ" : "ВЫКЛ");
+            std::lock_guard<std::mutex> hg(mHalMutex);
             applyAtmos(pend != 0);
         }
         int st = ef_wait(mEvFlagWord, kEventFlagDataMqNotEmpty, 500'000'000ULL /*500ms*/,
@@ -794,6 +824,7 @@ void DapEffect::workerLoop() {
         IEffect::Status status{};
         status.status = 0;  // OK
         if (mLegacyEnabled && mHandle && !bypass) {
+            std::lock_guard<std::mutex> hg(mHalMutex);
             int32_t r = (*mHandle)->process(mHandle, &bin, &bout);
             if (r != 0) {
                 ALOGW("process -> %d, fallback to passthrough", r);
@@ -852,6 +883,7 @@ void DapEffect::workerLoop() {
 ::ndk::ScopedAStatus DapEffect::command(CommandId id) {
     ALOGI("command id=%d", static_cast<int>(id));
     std::lock_guard lg(mMutex);
+    std::lock_guard<std::mutex> hg(mHalMutex);
     uint32_t replySize = sizeof(int32_t);
     int32_t reply = 0;
     switch (id) {
@@ -893,6 +925,7 @@ void DapEffect::workerLoop() {
 
 ::ndk::ScopedAStatus DapEffect::setParameter(const Parameter& p) {
     std::lock_guard lg(mMutex);
+    std::lock_guard<std::mutex> hg(mHalMutex);
     switch (p.getTag()) {
         case Parameter::deviceDescription: {
             if (mHandle) {
@@ -916,6 +949,7 @@ void DapEffect::workerLoop() {
                     ALOGI("SET_DEVICE: type=%d conn='%s' -> 0x%x headphone=%d", (int)ty,
                           cn.c_str(), dev, hp ? 1 : 0);
                 }
+                mDeviceFromFramework = true;
                 if (hp != mHeadphone || dev != mDevice) {
                     mHeadphone = hp;
                     mDevice = dev;

@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.dolby.atmos">
 
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
         android:label="Dolby Atmos"
         android:allowBackup="false"
@@ -17,5 +19,26 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- плитка в шторке быстрых настроек -->
+        <service
+            android:name=".DolbyTileService"
+            android:exported="true"
+            android:label="Dolby Atmos"
+            android:icon="@android:drawable/ic_media_play"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- кнопки уведомления -->
+        <receiver android:name=".ToggleReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="com.dolby.atmos.TOGGLE" />
+                <action android:name="com.dolby.atmos.SET_ON" />
+                <action android:name="com.dolby.atmos.SET_OFF" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

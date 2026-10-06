@@ -81,6 +81,25 @@ separate command channel.
 - **Diagnostics tooling.** Load probes for the libraries, mount checks, signal comparison before and
   after processing.
 
+## What the app can do
+
+Control is a separate app (WebView plus Java) that writes settings to files while the bridge applies
+them live, without restarting playback:
+
+- **on/off switch** with true A/B: off is a transparent passthrough, on is full Dolby processing;
+- **profiles**: Dolby (reference values), Music, Movie, Bass, Custom;
+- **sliders**: bass, dialogue, volume leveling, overall boost, scene width, virtual bass, volume
+  ceiling, Intelligent EQ strength;
+- **20-band equalizer** (47 Hz to 19.7 kHz) driven by dragging columns;
+- **Intelligent EQ curves taken from Dolby's own profile**: detailed, balanced, warm;
+- **effect toggles**: surround, virtualizer, reverb clean, hearing protection, speaker protection,
+  auto profile;
+- **user presets**: save, load, delete, plus text export and import;
+- **auto profile by output device**: the app asks the system whether headphones or the speaker are in
+  use, picks the matching boost and makes the engine switch to that device tuning;
+- **quick settings tile** and a notification with a toggle button;
+- **Russian/English UI switch** and an in-app processing log viewer.
+
 ## Key findings
 
 1. **Dolby libraries cannot do AIDL at all.** Three independent builds of `libswdap.so` (Sony, Poco F4,
@@ -98,6 +117,9 @@ separate command channel.
    always reports zero difference; a snapshot taken before processing is required.
 7. **Sample format and channel masks are Dolby specific**: `PCM_FLOAT` is 5 (not 4 as some headers
    suggest) and channels are given as an index mask (`0x3` for stereo).
+8. **Calls into the Dolby library must be serialized.** Processing runs on its own thread while system
+   commands arrive on a binder thread; concurrent calls crashed the audio process (a tombstone pointed
+   at the bridge). Fixed with a single mutex around every engine call.
 
 Details with function names, structure layouts and disassembly excerpts are in
 [docs/TECHNICAL.md](docs/TECHNICAL.md). The parameter table is in [docs/PARAMS.md](docs/PARAMS.md).
@@ -118,7 +140,8 @@ Details with function names, structure layouts and disassembly excerpts are in
 
 - The effect is visible to the system: `EffectsFactoryHalAidl with 21 nonProxyEffects` (20 stock).
 - Engine creation succeeds: `create_effect -> 0`, then `SET_CONFIG -> 0`, `EFFECT_CMD_INIT -> 0`.
-- Parameters are accepted: `SET_VALUES: 32 params, 592 bytes, device=0x2 -> r=0 status=0`.
+- Parameters are accepted: `SET_VALUES: 41 params, 896 bytes, device=0x8 -> r=0 status=0`
+  (41 means the profile plus app settings: equalizer, virtual bass, scene width and others).
 - Processing confirmed by measurement: the whole buffer changes (`diff=4096/4096`), leveler gain from
   +2 to +19 dB depending on program material.
 - The app switch is a true A/B: off means transparent passthrough and quieter output, on means the full
