@@ -9,6 +9,8 @@
 ![Lang](https://img.shields.io/badge/C%2B%2B-17-orange)
 ![License](https://img.shields.io/badge/license-MIT-informational)
 
+[Русская версия](README.md) · **English**
+
 <img src="docs/img/app-top.jpg" width="252" alt="App main screen">
 <img src="docs/img/app-settings.jpg" width="252" alt="App profiles and settings">
 

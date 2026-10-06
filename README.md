@@ -11,6 +11,8 @@
 ![Reverse](https://img.shields.io/badge/IDA%20Pro-реверс%20библиотек-purple)
 ![License](https://img.shields.io/badge/license-MIT-informational)
 
+**Русский** · [English version](README.en.md)
+
 <img src="docs/img/app-top.jpg" width="252" alt="Приложение: главный экран">
 <img src="docs/img/app-settings.jpg" width="252" alt="Приложение: профили и настройки">
 
